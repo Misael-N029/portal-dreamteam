@@ -1,0 +1,769 @@
+// Fuente única del esquema (PostgreSQL, producción). En desarrollo local se usa SQLite:
+// `npm run db:dev -w server` genera prisma/schema.dev.prisma desde este archivo.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Configuración dinámica de la plataforma (clave → JSON)
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Rol del personal. `permissions` es un JSON con las claves de administración (ver lib/permissions.ts).
+/// Los roles de sistema no se pueden borrar; el de administrador conserva siempre todos los permisos.
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  color       String   @default("#6B7280")
+  system      Boolean  @default(false)
+  permissions String   @default("[]")
+  /// Puede entrar desde cualquier IP aunque la restricción por IP esté activa
+  bypassIp    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users         User[]
+  modules       RoleModule[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  /// Copia cifrada (AES-256-GCM) de la contraseña asignada por un administrador, para poder mostrarla.
+  /// Se borra cuando el usuario cambia su contraseña por su cuenta.
+  passwordEnc  String?
+  active       Boolean   @default(true)
+  /// Sede a la que pertenece (alcance "su sede" en los módulos)
+  siteId       String?
+  site         Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  /// Supervisor a cargo (sus asesores son los que puede reubicar en el plano de sala)
+  supervisorId String?
+  supervisor   User?     @relation("Supervision", fields: [supervisorId], references: [id], onDelete: SetNull)
+  team         User[]    @relation("Supervision")
+  area         String?
+  position     String?
+  phone        String?
+  documentId   String?
+  lastLoginAt  DateTime?
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  createdById  String?
+  createdBy    User?   @relation("CreatedUsers", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers User[]  @relation("CreatedUsers")
+
+  /// Módulos concedidos a este usuario además de los de su rol
+  extraModules  UserModule[]
+  announcements Announcement[]
+  moduleOpens   ModuleOpen[]
+  favorites     Favorite[]
+  // Inventario
+  stations         Workstation[]    @relation("StationUser")
+  machines         Machine[]        @relation("MachineUser")
+  supplyDeliveries SupplyDelivery[] @relation("SupplyRecipient")
+  // DreamZone
+  posts         Post[]
+  postComments  PostComment[]
+  postVotes     PostVote[]
+  postLikes     PostLike[]
+  postSeen      PostSeen[]
+  mentionedIn   Post[]        @relation("PostMention")
+  notifications Notification[]
+}
+
+/// Aviso de la campanita para una persona
+model Notification {
+  id        String    @id @default(cuid())
+  kind      String
+  title     String
+  body      String?
+  /// Destino al abrirla: ruta ("/admin/...") o pantalla interna con sufijo ("zona#post-x", "inventario?tab=mio")
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+/// Módulo del panel de colaboradores.
+/// type: INTERNAL (pantalla propia del portal, `internalKey`) | LINK (abre `url`) | IFRAME (muestra `url` dentro del portal)
+model Module {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  icon        String   @default("LayoutGrid")
+  color       String   @default("#DC2626")
+  type        String   @default("LINK")
+  url         String?
+  internalKey String?
+  section     String   @default("Herramientas")
+  order       Int      @default(0)
+  active      Boolean  @default(true)
+  newTab      Boolean  @default(true)
+  /// Etiqueta corta opcional en la tarjeta (p. ej. "Nuevo")
+  badge       String?
+  /// Foto del bloque en el panel (ruta de /public, archivo subido o URL https). null = diseño de marca
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles     RoleModule[]
+  users     UserModule[]
+  opens     ModuleOpen[]
+  favorites Favorite[]
+}
+
+model RoleModule {
+  roleId   String
+  moduleId String
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  /// Acciones que el rol puede hacer en el módulo (JSON). Ver lib/module-access.ts para el catálogo por módulo.
+  actions  String @default("[\"view\"]")
+  /// Alcance de los datos: ALL (todo) | SITE (solo su sede) | OWN (solo lo asignado a la persona)
+  scope    String @default("ALL")
+
+  @@id([roleId, moduleId])
+}
+
+model UserModule {
+  userId   String
+  moduleId String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, moduleId])
+}
+
+model Favorite {
+  userId    String
+  moduleId  String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module    Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, moduleId])
+}
+
+/// Cada apertura de un módulo (para "más usados" y el dashboard)
+model ModuleOpen {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  userId   String
+  moduleId String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module   Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@index([moduleId, at])
+  @@index([userId, at])
+}
+
+/// Comunicado del panel. level: INFO | IMPORTANT | URGENT. `roleKeys` JSON: [] = todos
+model Announcement {
+  id          String    @id @default(cuid())
+  title       String
+  body        String
+  level       String    @default("INFO")
+  pinned      Boolean   @default(false)
+  active      Boolean   @default(true)
+  roleKeys    String    @default("[]")
+  publishedAt DateTime  @default(now())
+  expiresAt   DateTime?
+  /// Cuándo se avisó en la campanita (una sola vez, también para los programados)
+  notifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+}
+
+/// Bitácora de acciones de administración y accesos
+model AuditLog {
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  actorId   String?
+  actorName String
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  ip        String?
+
+  @@index([at])
+}
+
+// ── Centro de Reportes ──
+
+/// Reporte programado. kind: CRM (definición dinámica sobre las ventas del CRM) | SCREENSHOT (captura de webs)
+model Report {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?
+  kind          String    @default("CRM")
+  /// CRM: JSON con la definición (fuente, filtros, agrupación, columnas, indicadores y salidas). Ver reports/definition.ts
+  config        String    @default("{}")
+  /// Plantilla con la que se creó (solo informativo)
+  template      String?
+  active        Boolean   @default(true)
+  /// Horas en hora de Lima, separadas por coma: "08:00,18:30"
+  times         String    @default("08:00")
+  /// JSON con los días (0 = domingo … 6 = sábado)
+  daysOfWeek    String    @default("[0,1,2,3,4,5,6]")
+  retryCount    Int       @default(2)
+  /// Subtítulo del reporte (p. ej. la campaña)
+  subtitle      String?
+  /// Texto que acompaña la imagen en WhatsApp. Variables: {reporte} {subtitulo} {fecha} {total}
+  caption       String?
+  /// Asunto del correo (mismas variables)
+  emailSubject  String?
+  /// No envía nada si el reporte sale sin registros (como hacía el Apps Script)
+  skipIfEmpty   Boolean   @default(true)
+  /// SCREENSHOT: JSON [{ url, loginUrl, username, passwordEnc, usernameSelector, passwordSelector, submitSelector }]
+  targets       String    @default("[]")
+  lastRunAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  recipients ReportRecipient[]
+  runs       ReportRun[]
+}
+
+/// Destinatario. kind: EMAIL | WHATSAPP (número) | WHATSAPP_GROUP (id del grupo …@g.us)
+model Recipient {
+  id             String    @id @default(cuid())
+  name           String
+  description    String?
+  kind           String    @default("WHATSAPP")
+  value          String
+  active         Boolean   @default(true)
+  /// Ventana horaria (hora de Lima) en la que se le puede enviar en las ejecuciones automáticas
+  windowStart    String?
+  windowEnd      String?
+  lastDeliveryAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  reports ReportRecipient[]
+}
+
+model ReportRecipient {
+  reportId    String
+  recipientId String
+  report      Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  recipient   Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, recipientId])
+}
+
+/// Una ejecución. type: AUTOMATIC | MANUAL | TEST (a un solo destinatario) | PREVIEW (no envía)
+/// status: QUEUED | RUNNING | SUCCESS | PARTIAL | FAILED | SKIPPED (sin registros)
+model ReportRun {
+  id              String    @id @default(cuid())
+  type            String
+  status          String    @default("QUEUED")
+  /// Evita disparar dos veces el mismo horario programado: "reportId|2026-10-23|08:00"
+  slotKey         String?   @unique
+  attempt         Int       @default(1)
+  testRecipientId String?
+  requestedById   String?
+  requestedBy     String?
+  records         Int?
+  images          Int       @default(0)
+  attachment      String?
+  /// JSON con los nombres de quienes recibieron el reporte
+  sentTo          String    @default("[]")
+  errorMessage    String?
+  html            String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  durationMs      Int?
+  createdAt       DateTime  @default(now())
+
+  reportId String
+  report   Report      @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  logs     ReportLog[]
+
+  @@index([status, createdAt])
+  @@index([reportId, createdAt])
+}
+
+/// Bitácora paso a paso. level: INFO | SUCCESS | WARNING | ERROR · step: SCHEDULER | CRM | RENDER | SEND | SYSTEM
+model ReportLog {
+  id      String   @id @default(cuid())
+  at      DateTime @default(now())
+  level   String
+  step    String
+  message String
+  runId   String?
+  run     ReportRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([at])
+  @@index([runId])
+}
+
+// ── Trabaja con nosotros ──
+
+/// Vacante publicada en /trabaja-con-nosotros. modality: PRESENCIAL | HIBRIDO | REMOTO
+/// Sin uso: las postulaciones se gestionan en DreamTeam Campus. Se conserva para no borrar la tabla al desplegar.
+model JobOpening {
+  id           String   @id @default(cuid())
+  title        String
+  area         String?
+  summary      String?
+  location     String?
+  modality     String   @default("PRESENCIAL")
+  schedule     String?
+  salary       String?
+  /// JSON con listas de texto
+  requirements String   @default("[]")
+  benefits     String   @default("[]")
+  active       Boolean  @default(true)
+  featured     Boolean  @default(false)
+  order        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  applications Application[]
+}
+
+/// Postulación recibida desde la web. status: NEW | CONTACTED | INTERVIEW | HIRED | REJECTED
+/// experience: NONE | LT6 | M6_12 | GT12 (meses en ventas o call center)
+/// Sin uso: las postulaciones se gestionan en DreamTeam Campus. Se conserva para no borrar la tabla al desplegar.
+model Application {
+  id         String    @id @default(cuid())
+  name       String
+  documentId String
+  phone      String
+  email      String?
+  district   String?
+  jobTitle   String
+  shift      String?
+  startDate  String?
+  experience String    @default("NONE")
+  source     String?
+  message    String?
+  cvPath     String?
+  cvName     String?
+  status     String    @default("NEW")
+  notes      String?
+  ip         String?
+  consentAt  DateTime  @default(now())
+  contactedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  jobId String?
+  job   JobOpening? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([documentId])
+}
+
+// ── Inventario: sedes, plano de sala, equipos, insumos ──
+
+/// Sede de la empresa. planCols/planRows: tamaño de la cuadrícula del plano de sala.
+model Site {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  address   String?
+  city      String?
+  lat       Float?
+  lng       Float?
+  active    Boolean  @default(true)
+  planCols  Int      @default(24)
+  planRows  Int      @default(14)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  machines       Machine[]
+  transfersOut   MachineTransfer[] @relation("TransferFrom")
+  transfersIn    MachineTransfer[] @relation("TransferTo")
+  zones          FloorZone[]
+  stations       Workstation[]
+  supplyStock    SupplyStock[]
+  supplyMoves    SupplyMovement[]
+  supplyDeliveries SupplyDelivery[]
+}
+
+/// Categoría configurable. kind: EQUIPMENT (equipos con código propio) | SUPPLY (insumos con stock)
+/// slot (solo equipos): lugar del equipo en el kit del puesto: PC | MONITOR | HEADSET | PERIPHERAL | PHONE | OTHER
+model InventoryCategory {
+  id        String   @id @default(cuid())
+  kind      String   @default("EQUIPMENT")
+  key       String   @unique
+  name      String
+  icon      String   @default("Box")
+  color     String   @default("#6B7280")
+  slot      String?
+  /// Unidad por defecto de los insumos (unid., caja, paquete…)
+  unit      String?
+  order     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  machines Machine[]
+  supplies Supply[]
+
+  @@index([kind, order])
+}
+
+/// Zona o isla del plano de sala (rectángulo en la cuadrícula)
+model FloorZone {
+  id     String @id @default(cuid())
+  name   String
+  color  String @default("#DC2626")
+  x      Int
+  y      Int
+  w      Int
+  h      Int
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  stations Workstation[]
+
+  @@index([siteId])
+}
+
+/// Puesto de trabajo en el plano (una celda de la cuadrícula). Agrupa el kit de equipos.
+model Workstation {
+  id        String   @id @default(cuid())
+  code      String
+  x         Int
+  y         Int
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  siteId String
+  site   Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  zoneId String?
+  zone   FloorZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  /// Colaborador que ocupa el puesto
+  userId String?
+  user   User?      @relation("StationUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  machines Machine[]
+
+  @@unique([siteId, code])
+  @@index([siteId])
+  @@index([userId])
+}
+
+/// Equipo físico con código propio. `type` = clave de su categoría (se mantiene por compatibilidad).
+/// status: ACTIVE (en uso) | STORAGE (almacén) | REPAIR (en reparación) | TRANSIT (en traslado) | RETIRED (de baja)
+model Machine {
+  id          String    @id @default(cuid())
+  assetTag    String    @unique
+  type        String    @default("PC")
+  brand       String?
+  model       String?
+  serial      String?
+  hostname    String?
+  status      String    @default("ACTIVE")
+  /// Ubicación dentro de la sede (piso, puesto, estante)
+  location    String?
+  /// Texto libre heredado; la asignación real va en assignedUserId
+  assignedTo  String?
+  notes       String?
+  // Especificaciones y garantía (sin costos por ahora)
+  cpu           String?
+  ram           String?
+  storage       String?
+  os            String?
+  purchaseDate  DateTime?
+  supplier      String?
+  warrantyUntil DateTime?
+  lastMovedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id])
+  categoryId String?
+  category   InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  workstationId String?
+  workstation   Workstation? @relation(fields: [workstationId], references: [id], onDelete: SetNull)
+  assignedUserId String?
+  assignedUser   User? @relation("MachineUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  transfers MachineTransfer[]
+  events    AssetEvent[]
+  incidents Incident[]
+
+  @@index([siteId, status])
+  @@index([type])
+  @@index([categoryId])
+  @@index([workstationId])
+  @@index([assignedUserId])
+}
+
+/// Bitácora completa de un equipo. kind: CREATED | UPDATED | STATUS | MOVED | ASSIGNED | TRANSFER | RECEIVED |
+/// TRANSFER_CANCELLED | INCIDENT | INCIDENT_UPDATE | RETIRED | REACTIVATED | IMPORTED
+model AssetEvent {
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  kind      String
+  detail    String?
+  actorId   String?
+  actorName String?
+  machineId String
+  machine   Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, at])
+}
+
+/// Incidencia o mantenimiento de un equipo. status: OPEN | IN_PROGRESS | RESOLVED | CANCELLED · priority: LOW | MEDIUM | HIGH
+model Incident {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  status      String    @default("OPEN")
+  priority    String    @default("MEDIUM")
+  technician  String?
+  resolution  String?
+  /// Estado del equipo antes de entrar a reparación, para restaurarlo al cerrar
+  prevStatus  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  resolvedAt  DateTime?
+  reportedById   String?
+  reportedByName String?
+
+  machineId String
+  machine   Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([machineId, createdAt])
+}
+
+/// Insumo (consumible con stock por sede)
+model Supply {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  unit        String   @default("unid.")
+  description String?
+  /// Mínimo sugerido al habilitar el insumo en una sede nueva
+  defaultMin  Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categoryId String?
+  category   InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  stock      SupplyStock[]
+  movements  SupplyMovement[]
+  deliveries SupplyDelivery[]
+
+  @@index([categoryId])
+}
+
+/// Stock de un insumo en una sede
+model SupplyStock {
+  supplyId  String
+  siteId    String
+  quantity  Int      @default(0)
+  minStock  Int      @default(0)
+  updatedAt DateTime @updatedAt
+  supply    Supply   @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@id([supplyId, siteId])
+  @@index([siteId])
+}
+
+/// Kardex. kind: IN (entrada) | OUT (salida/consumo) | ADJUST (ajuste) | DELIVERY (entrega a colaborador) |
+/// RETURN (devuelto por rechazo de entrega) | TRANSFER_OUT | TRANSFER_IN. quantity con signo; balance = stock después.
+model SupplyMovement {
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  kind      String
+  quantity  Int
+  balance   Int
+  reason    String?
+  note      String?
+  actorId   String?
+  actorName String?
+  /// Sede del otro lado en un traslado
+  otherSiteId String?
+
+  supplyId String
+  supply   Supply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  siteId   String
+  site     Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([supplyId, siteId, at])
+  @@index([siteId, at])
+}
+
+/// Entrega de insumos a un colaborador. status: PENDING (por confirmar) | CONFIRMED | REJECTED
+model SupplyDelivery {
+  id          String    @id @default(cuid())
+  quantity    Int
+  status      String    @default("PENDING")
+  note        String?
+  answerNote  String?
+  createdAt   DateTime  @default(now())
+  answeredAt  DateTime?
+  deliveredById   String?
+  deliveredByName String?
+
+  supplyId String
+  supply   Supply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  siteId   String
+  site     Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation("SupplyRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+/// Traslado de una máquina entre sedes. status: PENDING (en tránsito) | RECEIVED (recibida en destino) | CANCELLED
+model MachineTransfer {
+  id         String    @id @default(cuid())
+  status     String    @default("PENDING")
+  reason     String?
+  note       String?
+  /// Estado de la máquina antes de salir, para restaurarlo al recibirla o cancelar
+  prevStatus String    @default("ACTIVE")
+  createdAt  DateTime  @default(now())
+  receivedAt DateTime?
+
+  machineId    String
+  machine      Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  fromSiteId   String
+  from         Site    @relation("TransferFrom", fields: [fromSiteId], references: [id])
+  toSiteId     String
+  to           Site    @relation("TransferTo", fields: [toSiteId], references: [id])
+  createdById  String?
+  createdByName String?
+  receivedById String?
+  receivedByName String?
+
+  @@index([status, createdAt])
+  @@index([machineId, createdAt])
+  @@index([toSiteId, status])
+  @@index([fromSiteId, status])
+}
+
+// ── DreamZone ──
+
+/// DreamZone: muro de la comunidad. kind: NEWS | EVENT | POLL | CHALLENGE | PHOTO | KUDOS (reconocimiento).
+/// `roleKeys` JSON: [] = todos los roles con el módulo. `notify` marca las publicaciones que avisan primero (campanita + aviso al entrar).
+model Post {
+  id           String    @id @default(cuid())
+  kind         String    @default("NEWS")
+  title        String
+  body         String    @default("")
+  imageUrl     String?
+  eventAt      DateTime?
+  closesAt     DateTime?
+  pinned       Boolean   @default(false)
+  active       Boolean   @default(true)
+  commentsOpen Boolean   @default(true)
+  notify       Boolean   @default(true)
+  roleKeys     String    @default("[]")
+  publishedAt  DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  /// Reconocimiento (kind KUDOS): compañero al que se felicita
+  mentionUserId String?
+  mention       User?   @relation("PostMention", fields: [mentionUserId], references: [id], onDelete: SetNull)
+
+  options  PostOption[]
+  votes    PostVote[]
+  comments PostComment[]
+  likes    PostLike[]
+  seen     PostSeen[]
+
+  @@index([active, publishedAt])
+}
+
+model PostOption {
+  id       String @id @default(cuid())
+  label    String
+  position Int    @default(0)
+  postId   String
+  post     Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  votes    PostVote[]
+}
+
+/// Un voto por persona y publicación (se puede cambiar mientras la votación siga abierta)
+model PostVote {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  optionId  String
+  option    PostOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model PostComment {
+  id        String   @id @default(cuid())
+  body      String
+  hidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+/// Reacción (una por persona y publicación). kind: LIKE ♥ | CLAP 👏 | PARTY 🎉 | STRONG 💪 | LAUGH 😂 (solo positivas)
+model PostLike {
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind   String @default("LIKE")
+
+  @@id([postId, userId])
+}
+
+/// Qué publicaciones ya vio cada persona (base de "nuevo" y de la campanita)
+model PostSeen {
+  postId String
+  post   Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt DateTime @default(now())
+
+  @@id([postId, userId])
+}

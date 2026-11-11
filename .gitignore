@@ -1,0 +1,12 @@
+node_modules
+dist
+server/.env
+server/prisma/*.db
+server/prisma/*.db-journal
+server/prisma/schema.dev.prisma
+*.tsbuildinfo
+# Datos que genera el portal (fotos, reportes, CV): no son código
+server/storage
+# Navegador de los reportes y registros
+.playwright
+*.log

@@ -1,0 +1,25 @@
+# Portal DreamTeam · /etc/systemd/system/portal-api.service
+# systemctl daemon-reload && systemctl enable --now portal-api
+# Logs: journalctl -u portal-api -f
+
+[Unit]
+Description=Portal DreamTeam API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=portal
+Group=portal
+# El API lee server/.env
+WorkingDirectory=/var/www/portal/server
+ExecStart=/usr/bin/node --import tsx src/index.ts
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=5
+# Endurecimiento: el servicio no necesita escribir fuera de su carpeta
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

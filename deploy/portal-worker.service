@@ -1,0 +1,25 @@
+# Portal DreamTeam · /etc/systemd/system/portal-worker.service
+# Programa y envía los reportes (Playwright + correo + WhatsApp). Va aparte del API para no cargarlo.
+# systemctl daemon-reload && systemctl enable --now portal-worker
+# Logs: journalctl -u portal-worker -f
+
+[Unit]
+Description=Portal DreamTeam · worker del Centro de Reportes
+After=network.target postgresql.service portal-api.service
+
+[Service]
+Type=simple
+User=portal
+Group=portal
+WorkingDirectory=/var/www/portal/server
+ExecStart=/usr/bin/node --import tsx src/worker.ts
+Environment=NODE_ENV=production
+# Chromium de Playwright instalado para el usuario portal (ver deploy/README.md)
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/www/portal/.playwright
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

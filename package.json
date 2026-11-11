@@ -1,0 +1,17 @@
+{
+  "name": "portal-dreamteam",
+  "private": true,
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "setup": "npm install && npm run db:setup -w server",
+    "dev": "concurrently -n api,worker,web -c red,yellow,gray \"npm run dev -w server\" \"npm run dev:worker -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}

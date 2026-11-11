@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tokens de marca DreamTeam: negro / rojo / blanco. --brand se sobreescribe desde Configuración. */
+:root {
+  --brand: #dc2626;
+  --brand-foreground: #ffffff;
+
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --surface: #f5f5f5;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --muted: #f5f5f5;
+  --muted-foreground: #6b7280;
+  --accent: #f5f5f5;
+  --accent-foreground: #111111;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: color-mix(in oklab, var(--brand) 55%, transparent);
+  --destructive: #dc2626;
+  --success: #15803d;
+  --warning: #b45309;
+
+  --sidebar: #0a0a0a;
+  --sidebar-foreground: #d1d5db;
+  --sidebar-muted: #6b7280;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-border: #1f1f1f;
+
+  --radius: 0.625rem;
+
+  /* Gráficos: una tinta neutra para magnitudes; verde/rojo solo para pasó/abandonó (validado CVD en claro y oscuro) */
+  --viz-ink: #404040;
+  --viz-ink-soft: #a3a3a3;
+  --viz-good: #15803d;
+  --viz-bad: #dc2626;
+  --viz-grid: #ececec;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --surface: #111111;
+  --card: #111111;
+  --card-foreground: #f5f5f5;
+  --popover: #141414;
+  --popover-foreground: #f5f5f5;
+  --muted: #1a1a1a;
+  --muted-foreground: #9ca3af;
+  --accent: #1c1c1c;
+  --accent-foreground: #f5f5f5;
+  --border: #262626;
+  --input: #2a2a2a;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --viz-ink: #d4d4d4;
+  --viz-ink-soft: #5c5c5c;
+  --viz-grid: #232323;
+
+  --sidebar: #050505;
+  --sidebar-accent: #161616;
+  --sidebar-border: #1a1a1a;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --text-xs: 12px;
+  --text-13: 13px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-xl: 20px;
+
+  --animate-in: enter 160ms ease-out;
+  --animate-slide-in-right: slide-in-right 220ms cubic-bezier(0.32, 0.72, 0, 1);
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01";
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Scroll invisible (menú lateral): sigue desplazándose con rueda, teclado y táctil */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
